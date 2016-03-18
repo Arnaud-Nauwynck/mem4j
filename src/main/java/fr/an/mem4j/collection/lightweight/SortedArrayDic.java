@@ -12,7 +12,23 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 
 /**
- * a Sorted Map<String,V> optimized for memory consuptions (and read operations)
+ * a Sorted Map<String,V> optimized for memory consumptions (and read operations).
+ * 
+ * <p>
+ * Algorithm used for finding element by key: dichotomic search = O(log(N)),
+ * then insert/remove=O(N) for moving all remaining elements
+ * 
+ * <H2>Memory Data Layout:</H2>
+ * <PRE>
+ * +----------------+
+ * |4: int32 size   |        +---------------------------------+
+ * |4/8 ptr: keys  -|------> |String[] :  size + nx 4/8 String |
+ * |4/8 ptr: values-|--      +---------------------------------+
+ * +----------------+  \
+ *                      \    +---------------------------------+
+ *                       --> |T[]: size + n x 4/8 ptr Object   |
+ *                           +---------------------------------+
+ * </PRE>
  *
  * @param <V>
  */
