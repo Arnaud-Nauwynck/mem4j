@@ -9,6 +9,9 @@ public class MutableMapEntry<K,V> implements Map.Entry<K,V> {
 
     // ------------------------------------------------------------------------
     
+    public MutableMapEntry() {
+    }
+    
     public MutableMapEntry(K key, V value) {
         this.key = key;
         this.value = value;
