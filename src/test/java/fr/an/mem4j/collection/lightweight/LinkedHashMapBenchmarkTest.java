@@ -74,15 +74,18 @@ public class LinkedHashMapBenchmarkTest {
         int distinctEltsCount = benchArraySize*2;
         String[] keys = new String[distinctEltsCount];
         Integer[] values = new Integer[distinctEltsCount];
+        boolean[] presents = new boolean[distinctEltsCount];
         for (int i = 0; i < distinctEltsCount; i++) {
             int v = i * 3;
             keys[i] = String.valueOf(v);
             values[i] = Integer.valueOf(v);
+            presents[i] = false;
         }
         Random rand = new Random(0);
         
         for (int i = 0; i < benchArraySize; i++) {
             sut.put(keys[i], values[i]);
+            presents[i] = true;
         }
         
         if (DEBUG) System.out.print("sizes: ");
@@ -112,7 +115,8 @@ public class LinkedHashMapBenchmarkTest {
         
         long time = System.currentTimeMillis() - startMillis;
         System.out.println("bench " + display + " [size:" + benchArraySize + " x repeat:" + repeatCount + "] " + time + " ms"  
-            + " (= " + repeatCount + " containsKey(), " + countAdded + " put(), " + countRemoved + " remove() )");
+            + " (= " + repeatCount + " containsKey(), " + countAdded + " put(), " + countRemoved + " remove() )"
+            + " finalSize:" + sut.size());
     }
     
     

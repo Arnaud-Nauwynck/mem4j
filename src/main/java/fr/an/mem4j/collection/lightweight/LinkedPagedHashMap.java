@@ -5,6 +5,9 @@ import java.util.AbstractSet;
 import java.util.Iterator;
 import java.util.Set;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import fr.an.mem4j.collection.util.MutableMapEntry;
 
 /**
@@ -35,7 +38,11 @@ import fr.an.mem4j.collection.util.MutableMapEntry;
  * </PRE>
  */
 public class LinkedPagedHashMap<K,V> extends AbstractMap<K,V> {
-
+    
+    private static final Logger LOG = LoggerFactory.getLogger(LinkedPagedHashMap.class);
+    
+    private static final boolean DEBUG_CHECK_INVARIANTS = false;
+    
     private static final int NONE = -1;
     private static final int INIT_HASH_LEN = 23;
     
@@ -138,10 +145,10 @@ public class LinkedPagedHashMap<K,V> extends AbstractMap<K,V> {
             
             // insert page+offset in hash: find empty insertion slot, maybe alloc/realloc(+reindex) hash
             hashSlot = insertionHashSlot(key, keyHash);
-            nthHashPages(hashSlot.nthHash)[hashSlot.slot] = page;
-            nthHashOffsets(hashSlot.nthHash)[hashSlot.slot] = pageOffset;
-            nthHashUsedCountIncr(hashSlot.nthHash, +1);
+            nthHashPartition(hashSlot.hashPart).setPageOffsetAtSlot(hashSlot.slot, page, pageOffset);
+            nthHashUsedCountIncr(hashSlot.hashPart, +1);
         }
+        if (DEBUG_CHECK_INVARIANTS) checkInvariants();
         return res;
     }
 
@@ -157,14 +164,16 @@ public class LinkedPagedHashMap<K,V> extends AbstractMap<K,V> {
         HashSlot hashSlot = lookupHashSlot(key, keyHash);
         if (hashSlot != null) {
             size--;
-            LinkedEntriesPagedNode<K, V> page = nthHashPages(hashSlot.nthHash)[hashSlot.slot];
-            int pageOffset = nthHashOffsets(hashSlot.nthHash)[hashSlot.slot];
-            res = page.getValueAt(pageOffset);
+            HashPartition<K, V> hashPart = nthHashPartition(hashSlot.hashPart);
+            res = hashPart.getValueAtIndirectSlot(hashSlot.slot);
             
             // remove indirect page/offset from hash (unshift conflicts if any)
-            nthHashUsedCountIncr(hashSlot.nthHash, -1);
-            nthHashPages(hashSlot.nthHash)[hashSlot.slot] = null;
-            unshiftNextHashConflicts(nthHashPages(hashSlot.nthHash), nthHashOffsets(hashSlot.nthHash), hashSlot.slot);
+            nthHashUsedCountIncr(hashSlot.hashPart, -1);
+
+            LinkedEntriesPagedNode<K, V> page = hashPart.getPageAtSlot(hashSlot.slot);
+            int pageOffset = hashPart.getPageOffsetAtSlot(hashSlot.slot);
+            hashPart.setPageOffsetAtSlot(hashSlot.slot, null, 0);
+            hashPart.unshiftNextHashConflicts(this, hashSlot.slot);
 
             // update remaining page offset in corresponding hashs pages+offsets
             for(int i = pageOffset + 1, len = page.size; i < len; i++) {
@@ -172,9 +181,12 @@ public class LinkedPagedHashMap<K,V> extends AbstractMap<K,V> {
                 int reindexKeyHash = hashCodeOf(reindexKey);
                 HashSlot reindexHashSlot = lookupHashSlot(reindexKey, reindexKeyHash);
                 assert reindexHashSlot != null;
-                LinkedEntriesPagedNode<K, V>[] reindexNthHashPages = nthHashPages(reindexHashSlot.nthHash);
+                if (reindexHashSlot == null) {
+                    LOG.error("interal err: slot not found");
+                }
+                LinkedEntriesPagedNode<K, V>[] reindexNthHashPages = nthHashPages(reindexHashSlot.hashPart);
                 reindexNthHashPages[reindexHashSlot.slot] = page;
-                nthHashOffsets(reindexHashSlot.nthHash)[reindexHashSlot.slot] = i - 1;
+                nthHashOffsets(reindexHashSlot.hashPart)[reindexHashSlot.slot] = i - 1;
             }
 
             page.removeAt(pageOffset);
@@ -197,37 +209,8 @@ public class LinkedPagedHashMap<K,V> extends AbstractMap<K,V> {
             // not found, nothing to remove
             res = null;
         }
+        if (DEBUG_CHECK_INVARIANTS) checkInvariants();
         return res;
-    }
-
-    protected void unshiftNextHashConflicts(LinkedEntriesPagedNode<K, V>[] hashPages, int[] hashPageOffsets, int startSlot) {
-        final int hashLen = hashPages.length;
-        for(;;) {
-            int lastSlotConflict = startSlot;
-            for(int currSlot = nextModulo(startSlot, hashLen); currSlot != startSlot; currSlot = nextModulo(currSlot, hashLen)) {
-                LinkedEntriesPagedNode<K, V> page = hashPages[currSlot];
-                if (page == null) {
-                    break;
-                }
-                int pageOffset = hashPageOffsets[currSlot];
-                K currKey = page.getKeyAt(pageOffset);
-                int currKeyHash = hashCodeOf(currKey);
-                int currKeySlot = posOf(currKeyHash, hashPages);
-                if (currKeySlot == startSlot) {
-                    lastSlotConflict = currKeySlot; 
-                }
-            }
-            if (lastSlotConflict != startSlot) {
-                // found conflict: solve by writing start(empty) with last, continue from last
-                hashPages[startSlot] = hashPages[lastSlotConflict];
-                hashPageOffsets[startSlot] = hashPageOffsets[lastSlotConflict];
-                hashPages[lastSlotConflict] = null;
-                hashPageOffsets[lastSlotConflict] = 0;
-                startSlot = lastSlotConflict;
-            } else {
-                break;
-            }
-        }
     }
 
     @Override
@@ -327,22 +310,173 @@ public class LinkedPagedHashMap<K,V> extends AbstractMap<K,V> {
     
     // ------------------------------------------------------------------------
 
+    protected void checkInvariants() {
+        if (hash0Pages != null) {
+            new HashPartition<>(this, 0, hash0Pages, hash0Offsets).checkInvariants();
+        }
+        if (hash1Pages != null) {
+            new HashPartition<>(this, 1, hash1Pages, hash1Offsets).checkInvariants();
+        }
+        if (hash2Pages != null) {
+            new HashPartition<>(this, 2, hash2Pages, hash2Offsets).checkInvariants();
+        }
+    }
+    
+    /** temporary wrapper for {hashPart,slot} */
     protected static class HashSlot {
-        int nthHash;
-        int slot;
+        protected int hashPart;
+        protected int slot;
         // LinkedEntriesPagedNode/*<K,V>*/ nthHashPages;
         // K key;
         // V value;
         
         public HashSlot() {
         }
-        public HashSlot(int nthHash, int offset) {
-            this.nthHash = nthHash;
+        public HashSlot(int hashPart, int offset) {
+            this.hashPart = hashPart;
             this.slot = offset;
         }
         
     }
-    
+
+    /** temporary wrapper for {hashPart,  hashPages=..(hashPart),hashOffsets=..(hashPart) } */
+    protected static class HashPartition<K,V> {
+        protected LinkedPagedHashMap<K,V> owner;
+        protected int hashPart;
+        protected LinkedEntriesPagedNode<K, V>[] hashPages;
+        protected int[] hashOffsets;
+        
+        public HashPartition(LinkedPagedHashMap<K,V> owner, int hashPart, LinkedEntriesPagedNode<K,V>[] hashPages, int[] hashOffsets) {
+            this.owner = owner;
+            this.hashPart = hashPart;
+            this.hashPages = hashPages;
+            this.hashOffsets = hashOffsets;
+        }
+
+        public void setPageOffsetAtSlot(int slot, LinkedEntriesPagedNode<K, V> page, int pageOffset) {
+            hashPages[slot] = page;
+            hashOffsets[slot] = pageOffset;            
+        }
+
+        public LinkedEntriesPagedNode<K,V> getPageAtSlot(int slot) {
+            return hashPages[slot];
+        }
+        public int getPageOffsetAtSlot(int slot) {
+            return hashOffsets[slot];            
+        }
+
+        public K getKeyAtIndirectSlot(int slot) {
+            LinkedEntriesPagedNode<K, V> page = hashPages[slot];
+            int pageOffset = hashOffsets[slot];
+            return page.getKeyAt(pageOffset);
+        }
+
+        public V getValueAtIndirectSlot(int slot) {
+            LinkedEntriesPagedNode<K, V> page = hashPages[slot];
+            int pageOffset = hashOffsets[slot];
+            return page.getValueAt(pageOffset);
+        }
+        
+        /* rehash all keys in same cluster (Linear Probing algorithm)  */
+        protected void unshiftNextHashConflicts(LinkedPagedHashMap<K, V> owner, final int slotStart) {
+            final int hashLen = hashPages.length;
+            for (int i = nextModulo(slotStart, hashLen); ; i = nextModulo(i, hashLen)) {
+                LinkedEntriesPagedNode<K, V> page = hashPages[i];
+                if (page == null) {
+                    break;
+                }
+                int pageOffset = hashOffsets[i];
+                K key = page.getKeyAt(pageOffset);
+                int keyHash = owner.hashCodeOf(key);
+                int keyPos = posOf(keyHash, hashPages.length);
+                if (keyPos != i) {
+                    // delete and reinsert
+                    setPageOffsetAtSlot(i, null, 0);
+                    // TODO inneficient re-scan
+                    int hashSlot = owner.insertionHashSlot(key, keyHash, hashPages, hashOffsets);
+                    setPageOffsetAtSlot(hashSlot, page, pageOffset);
+                }
+            }
+        }
+        
+        protected void __BUG_unshiftNextHashConflicts(LinkedPagedHashMap<K, V> owner, final int slotStart) {
+            final int hashLen = hashPages.length;
+            int freeSlot = slotStart;
+            int fullSlotStart = slotStart;
+            int fullSlotEnd = nextModulo(slotStart, hashLen);
+            for(;;) {
+                int lastSlotConflict = fullSlotStart;
+                for(int currSlot = fullSlotEnd; currSlot != fullSlotStart; currSlot = nextModulo(currSlot, hashLen)) {
+                    LinkedEntriesPagedNode<K, V> page = hashPages[currSlot];
+                    if (page == null) {
+                        break;
+                    }
+                    int pageOffset = hashOffsets[currSlot];
+                    K currKey = page.getKeyAt(pageOffset);
+                    int currKeyHash = owner.hashCodeOf(currKey);
+                    int currKeyPos = posOf(currKeyHash, hashPages.length);
+                    if (currKeyPos <= slotStart) { // BUG ...
+                        lastSlotConflict = currSlot; 
+                    }
+                }
+                if (lastSlotConflict != fullSlotStart) {
+                    // found conflict: solve by writing start(empty) with last, continue from last
+                    hashPages[freeSlot] = hashPages[lastSlotConflict];
+                    hashOffsets[freeSlot] = hashOffsets[lastSlotConflict];
+                    hashPages[lastSlotConflict] = null;
+                    hashOffsets[lastSlotConflict] = 0;
+                    freeSlot = lastSlotConflict;
+                    fullSlotStart = nextModulo(freeSlot, hashLen);
+                    fullSlotEnd = nextModulo(lastSlotConflict, hashLen);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("HashPartition " + hashPart + ": ");
+            for (int i = 0; i < hashPages.length; i++) {
+                LinkedEntriesPagedNode<K, V> p = hashPages[i];
+                if (p != null) {
+                    K key = p.getKeyAt(hashOffsets[i]);
+                    int keyHash = owner.hashCodeOf(key);
+                    int keyPos = posOf(keyHash, hashPages.length); 
+                    sb.append("[" + i);
+                    if (keyPos != i) {
+                        sb.append("!=" + keyPos);
+                    }
+                    sb.append("]");
+                    
+                    sb.append("p,off:" + hashOffsets[i] + " -> ");
+                    sb.append(key);
+                    sb.append(", ");
+                }
+            }
+            return sb.toString();
+        }
+
+        protected void checkInvariants() {
+            boolean prevEmpty = hashPages[hashPages.length-1] == null;
+            for (int i = 0; i < hashPages.length; i++) {
+                LinkedEntriesPagedNode<K, V> p = hashPages[i];
+                if (p != null) {
+                    K key = p.getKeyAt(hashOffsets[i]);
+                    int keyHash = owner.hashCodeOf(key);
+                    int keyPos = posOf(keyHash, hashPages.length); 
+                    if (keyPos != i) {
+                        if (prevEmpty) {
+                            throw new RuntimeException("internal invariant violation: conflict in " + i + " while prev slot is empty!");
+                        }
+                    }
+                }
+                prevEmpty = p == null;
+            }
+        }
+        
+    }
     
     private static int nextModulo(int pos, int len) {
         int res = pos + 1;
@@ -388,7 +522,7 @@ public class LinkedPagedHashMap<K,V> extends AbstractMap<K,V> {
     protected int lookupHashSlot(K key, int keyHash, LinkedEntriesPagedNode<K,V>[] hashPages, int[] hashOffsets) {
         if (hashPages != null) {
             final int hashLen = hashPages.length;
-            final int firstPos = keyHash % hashLen;
+            final int firstPos = posOf(keyHash, hashLen);
             if (hashPages[firstPos] != null) {
                 K posKey = hashPages[firstPos].getKeyAt(hashOffsets[firstPos]);
                 if (keyEquals(key, posKey)) {
@@ -415,19 +549,20 @@ public class LinkedPagedHashMap<K,V> extends AbstractMap<K,V> {
     protected HashSlot insertionHashSlot(K key, int keyHash) {
         // TOCHANGE? may iterate in order on hash0,1,2... to minimize conflicts
         // may also use arg min (hash0123.length - hash0123UsedCount)
-        if (hash0Pages != null) {
+        // TODO : should alloc new / realloc+re-hash increase size if loadFactor > 0.5  (else too many conflicts!! ... extremely slow) 
+        if (hash0Pages != null && (hash0UsedCount+hash0UsedCount) < hash0Pages.length) {
             int offset = insertionHashSlot(key, keyHash, hash0Pages, hash0Offsets);
             if (offset != NONE) {
                 return new HashSlot(0, offset); 
             }
         }
-        if (hash1Pages != null) {
+        if (hash1Pages != null && (hash1UsedCount+hash1UsedCount) < hash1Pages.length) {
             int offset = insertionHashSlot(key, keyHash, hash1Pages, hash1Offsets);
             if (offset != NONE) {
                 return new HashSlot(1, offset); 
             }
         }
-        if (hash2Pages != null) {
+        if (hash2Pages != null && (hash2UsedCount+hash2UsedCount) < hash2Pages.length) {
             int offset = insertionHashSlot(key, keyHash, hash2Pages, hash2Offsets);
             if (offset != NONE) {
                 return new HashSlot(2, offset); 
@@ -439,17 +574,17 @@ public class LinkedPagedHashMap<K,V> extends AbstractMap<K,V> {
             int allocSize = Math.max(INIT_HASH_LEN, size);
             hash0Pages = new LinkedEntriesPagedNode[allocSize];
             hash0Offsets = new int[allocSize];
-            return new HashSlot(0, posOf(keyHash, hash0Pages));
+            return new HashSlot(0, posOf(keyHash, hash0Pages.length));
         } else if (hash1Pages == null) {
             int allocSize = Math.max(INIT_HASH_LEN, size);
             hash1Pages = new LinkedEntriesPagedNode[allocSize];
             hash1Offsets = new int[allocSize];
-            return new HashSlot(1, posOf(keyHash, hash1Pages));
+            return new HashSlot(1, posOf(keyHash, hash1Pages.length));
         } else if (hash2Pages == null) {
             int allocSize = Math.max(INIT_HASH_LEN, size);
             hash2Pages = new LinkedEntriesPagedNode[allocSize];
             hash2Offsets = new int[allocSize];
-            return new HashSlot(2, posOf(keyHash, hash2Pages));
+            return new HashSlot(2, posOf(keyHash, hash2Pages.length));
         }
         
         // all full.. need realloc + reindex! 
@@ -476,13 +611,15 @@ public class LinkedPagedHashMap<K,V> extends AbstractMap<K,V> {
         int[] newNthOffsets = new int[allocSize];
         for(int i = 0; i < nthPages.length; i++) {
             LinkedEntriesPagedNode<K,V> page = nthPages[i];
+            if (page != null) {
+                int pageOffset = nthOffsets[i];
+                K reindexKey = page.getKeyAt(pageOffset);
+                int reindexKeyHash = hashCodeOf(reindexKey);
+                int newI = insertionHashSlot(reindexKey, reindexKeyHash, newNthPages, newNthOffsets);
+                newNthPages[newI] = page;
+                newNthOffsets[newI] = pageOffset;
+            }
             nthPages[i] = null; // gc friendly: clear prev refs
-            int pageOffset = nthOffsets[i];
-            K reindexKey = page.getKeyAt(pageOffset);
-            int reindexKeyHash = hashCodeOf(reindexKey);
-            int newI = insertionHashSlot(reindexKey, reindexKeyHash, newNthPages, newNthOffsets);
-            newNthPages[newI] = page;
-            newNthOffsets[newI] = pageOffset;
         }
         setNthHashPageAndOffsets(nth, newNthPages, newNthOffsets);
         
@@ -490,14 +627,14 @@ public class LinkedPagedHashMap<K,V> extends AbstractMap<K,V> {
         return new HashSlot(nth, offset);
     }
     
-    protected int posOf(int keyHash, LinkedEntriesPagedNode<K,V>[] hashPages) {
-        return keyHash % hashPages.length;
+    protected static int posOf(int keyHash, int len) {
+        return (keyHash & 0x7fffffff) % len;
     }
     
     protected int insertionHashSlot(K key, int keyHash, LinkedEntriesPagedNode<K,V>[] hashPages, int[] hashOffsets) {
         if (hashPages != null) {
             final int hashLen = hashPages.length;
-            final int firstPos = keyHash % hashLen;
+            final int firstPos = posOf(keyHash, hashLen);
             if (hashPages[firstPos] == null) {
                 return firstPos;
             } else {
@@ -510,6 +647,15 @@ public class LinkedPagedHashMap<K,V> extends AbstractMap<K,V> {
             }
         }
         return NONE;
+    }
+    
+    protected HashPartition<K,V> nthHashPartition(int n) {
+        switch(n) {
+        case 0: return new HashPartition<K,V>(this, 0, hash0Pages, hash0Offsets);
+        case 1: return new HashPartition<K,V>(this, 1, hash1Pages, hash1Offsets);
+        case 2: return new HashPartition<K,V>(this, 2, hash2Pages, hash2Offsets);
+        default: throw new IllegalArgumentException();
+        }
     }
     
     protected LinkedEntriesPagedNode<K,V>[] nthHashPages(int n) {
@@ -535,20 +681,20 @@ public class LinkedPagedHashMap<K,V> extends AbstractMap<K,V> {
     }
 
     protected K getKeyAtIndirectHashSlot(HashSlot hashSlot) {
-        LinkedEntriesPagedNode<K, V> page = nthHashPages(hashSlot.nthHash)[hashSlot.slot];
-        int pageOffset = nthHashOffsets(hashSlot.nthHash)[hashSlot.slot];
+        LinkedEntriesPagedNode<K, V> page = nthHashPages(hashSlot.hashPart)[hashSlot.slot];
+        int pageOffset = nthHashOffsets(hashSlot.hashPart)[hashSlot.slot];
         return page.getKeyAt(pageOffset);
     }
 
     protected V getValueAtIndirectHashSlot(HashSlot hashSlot) {
-        LinkedEntriesPagedNode<K, V> page = nthHashPages(hashSlot.nthHash)[hashSlot.slot];
-        int pageOffset = nthHashOffsets(hashSlot.nthHash)[hashSlot.slot];
+        LinkedEntriesPagedNode<K, V> page = nthHashPages(hashSlot.hashPart)[hashSlot.slot];
+        int pageOffset = nthHashOffsets(hashSlot.hashPart)[hashSlot.slot];
         return page.getValueAt(pageOffset);
     }
     
     protected V setKeyValueAtIndirectHashSlot(HashSlot hashSlot, K key, V value) {
-        LinkedEntriesPagedNode<K, V> page = nthHashPages(hashSlot.nthHash)[hashSlot.slot];
-        int pageOffset = nthHashOffsets(hashSlot.nthHash)[hashSlot.slot];
+        LinkedEntriesPagedNode<K, V> page = nthHashPages(hashSlot.hashPart)[hashSlot.slot];
+        int pageOffset = nthHashOffsets(hashSlot.hashPart)[hashSlot.slot];
         V res = page.getValueAt(pageOffset);
         page.setKeyValueAt(pageOffset, key, value);
         return res;

@@ -44,7 +44,19 @@ public class LinkedPagedHashMapTest {
         Assert.assertEquals("{123=123, 234=234}", sut.toString());
         Assert.assertEquals(check.toString(), sut.toString());
         
-        for(int i = 0; i < 100; i++) {
+        int splitPut = 35;
+        for(int i = 0; i < splitPut; i++) {
+            String keyI = Integer.toString(i);
+            sut.put(keyI, i);
+            check.put(keyI, i);
+            Assert.assertTrue(sut.containsKey(keyI));
+            Assert.assertEquals(i, sut.get(keyI).intValue());
+            Assert.assertEquals(check.toString(), sut.toString());
+            for(int j = 0; j <= i; j++) {
+                Assert.assertEquals(j, sut.get(Integer.toString(j)).intValue());
+            }
+        }
+        for(int i = splitPut; i < 100; i++) {
             String keyI = Integer.toString(i);
             sut.put(keyI, i);
             check.put(keyI, i);
@@ -56,9 +68,18 @@ public class LinkedPagedHashMapTest {
             }
         }
         
+        
+        
         sut.get("0");
         sut.get("1");
-        for(int i = 0; i < 100; i++) {
+        int split = 27;
+        for(int i = 0; i < split; i++) {
+            String keyI = Integer.toString(i);
+            sut.remove(keyI);
+            check.remove(keyI);
+        }
+        Assert.assertEquals(check.toString(), sut.toString());
+        for(int i = split; i < 100; i++) {
             String keyI = Integer.toString(i);
             sut.remove(keyI);
             check.remove(keyI);
