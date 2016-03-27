@@ -307,7 +307,7 @@ public class SortedArrayDic<V> extends AbstractMap<String, V> {
                 throw new IllegalStateException();
             // checkForComodification();
             try {
-                SortedArrayDic.this.remove(lastRet);
+                SortedArrayDic.this.remove(keys[lastRet]);
                 cursor = lastRet;
                 lastRet = -1;
                 // expectedModCount = modCount;
@@ -423,7 +423,7 @@ public class SortedArrayDic<V> extends AbstractMap<String, V> {
                 throw new IllegalStateException();
             // checkForComodification();
             try {
-                SortedArrayDic.this.remove(lastRet);
+                SortedArrayDic.this.remove(keys[lastRet]);
                 cursor = lastRet;
                 lastRet = -1;
                 // expectedModCount = modCount;
