@@ -3,7 +3,7 @@ package fr.an.mem4j.offheap.impl;
 import sun.misc.Unsafe;
 
 @SuppressWarnings("restriction")
-class Mem4jUnsafe {
+public class Mem4jUnsafe {
 
     /** private to force all static */
     private Mem4jUnsafe() {
