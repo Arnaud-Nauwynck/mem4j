@@ -13,7 +13,7 @@ public class TypedMemorySystem {
     
     private final Malloc malloc;
 
-    private static final int dataTypeHeaderLen = 4;
+    private static final int dataTypeHeaderLen = 32;
     
     private static final Unsafe unsafe = Mem4jUnsafe.getUnsafe();
     
