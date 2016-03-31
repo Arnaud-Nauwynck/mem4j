@@ -68,6 +68,7 @@ public class DataTypeSystem {
     }
     
     private void registerBuiltinDataTypes() {
+        doRegisterDataType(new PrimitiveDataType(this, "bit", newTypeId(), 1, Boolean.class));
         doRegisterDataType(new PrimitiveDataType(this, "bool", newTypeId(), 8, Boolean.class));
         doRegisterDataType(new PrimitiveDataType(this, "byte", newTypeId(), 8, Byte.class));
         doRegisterDataType(new PrimitiveDataType(this, "char", newTypeId(), 16, Character.class));
@@ -76,6 +77,9 @@ public class DataTypeSystem {
         doRegisterDataType(new PrimitiveDataType(this, "long", newTypeId(), 64, Long.class));
         doRegisterDataType(new PrimitiveDataType(this, "float", newTypeId(), 32, Float.class));
         doRegisterDataType(new PrimitiveDataType(this, "double", newTypeId(), 64, Double.class));
+
+        doRegisterDataType(new PrimitiveDataType(this, "virtualAddr", newTypeId(), 64, Long.class));
+        doRegisterDataType(new PrimitiveDataType(this, "addr", newTypeId(), 64, Long.class));
     }
 
     private void doRegisterDataType(NamedDataType dataType) {
