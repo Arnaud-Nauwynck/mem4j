@@ -1,7 +1,6 @@
 package fr.an.mem4j.datatypesystem;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 
 import fr.an.mem4j.collection.util.CopyOnWriteUtils;
@@ -23,17 +22,20 @@ public class DataTypeSystem {
 
     private final Object lock = new Object();
     
+    /**
+     * thread safety: @ProtectedBy(lock)
+     */
     private int typeIdGenerator = 1;
     
     /**
-     * immutable, copy-on-write
+     * thread safety: immutable, copy-on-write @ProtectedBy(lock)
      */
     private Map<Integer,DataType> typeId2DataType = Collections.emptyMap();
 
     /**
-     * immutable, copy-on-write
+     * thread safety: immutable, copy-on-write @ProtectedBy(lock)
      */
-    private Map<String,DataType> name2DataType = new HashMap<>();
+    private Map<String,DataType> name2DataType = Collections.emptyMap();
     
     // ------------------------------------------------------------------------
 
