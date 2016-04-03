@@ -51,8 +51,6 @@ public class TypedMemorySystem {
         long addr = malloc.calloc(allocLen);
         unsafe.putInt(addr, arrayDataType.getTypeId());
         unsafe.putInt(addr+arraySizeLen, arrayDataType.getTypeId());
-//        for(int i = 0; i < aarrayLen; i++) {
-//        }
         return new TypedMemPointer(addr, arrayDataType);
     }
     
